@@ -1,0 +1,40 @@
+import sys
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget
+from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtCore import Qt, QTimer, QPointF
+
+class GameWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.game_timer = QTimer()
+        self.game_timer.timeout.connect(self.update)
+        self.game_timer.start(1000 // 60) # 60 FPS
+        self.player_x = 100
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        # Простой фон (серое небо) и земля
+        painter.fillRect(0, 0, 1200, 500, QColor(200, 200, 200))
+        painter.fillRect(0, 500, 1200, 100, QColor(100, 100, 100))
+        
+        # Рисуем "палочного" персонажа без дизайна
+        painter.setBrush(QColor(50, 50, 255))
+        painter.drawRect(self.player_x, 460, 30, 40) # Тело
+        painter.setBrush(QColor(255, 200, 200))
+        painter.drawEllipse(QPointF(self.player_x + 15, 450), 12, 12) # Голова
+        
+        # Снежок в руке
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawEllipse(QPointF(self.player_x + 35, 470), 8, 8)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setCentralWidget(GameWidget())
+        self.resize(1200, 600)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())

@@ -1,0 +1,107 @@
+import sys
+import math
+import random
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget
+from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtCore import Qt, QTimer, QPointF
+
+class Snowball:
+    def __init__(self, x, y, angle, power):
+        self.x = x
+        self.y = y
+        self.radius = 8
+        self.vx = math.cos(math.radians(angle)) * power
+        self.vy = -math.sin(math.radians(angle)) * power
+        self.active = True
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.45 # Гравитация
+        if self.y > 500 or self.x > 1200 or self.x < 0:
+            self.active = False
+
+class GameWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.game_timer = QTimer()
+        self.game_timer.timeout.connect(self.update_game)
+        self.game_timer.start(1000 // 60)
+        
+        self.snowballs = []
+        self.targets = [[800, 500], [1000, 500]] # Простые цели: [x, y]
+        self.obstacles = [[400, 100, 100]] # Препятствия: [x, w, h]
+        self.angle = 45
+        self.power = 0
+        self.is_charging = False
+        self.power_phase = 0
+
+    def update_game(self):
+        if self.is_charging:
+            self.power_phase += 0.05
+            self.power = 5 + 18 * abs(math.sin(self.power_phase))
+
+        for sb in self.snowballs[:]:
+            sb.update()
+            if not sb.active:
+                self.snowballs.remove(sb)
+                continue
+                
+            for t in self.targets[:]:
+                if math.hypot(sb.x - t[0], sb.y - (t[1] - 30)) < sb.radius + 30:
+                    self.targets.remove(t)
+                    self.snowballs.remove(sb)
+                    # Спавним новую цель (бесконечный режим)
+                    self.targets.append([random.randint(600, 1100), 500])
+                    break
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(0, 0, 1200, 500, QColor(200, 200, 200))
+        painter.fillRect(0, 500, 1200, 100, QColor(100, 100, 100))
+        
+        painter.setBrush(QColor(150, 150, 150))
+        for obs in self.obstacles:
+            painter.drawRect(obs[0], 500 - obs[2], obs[1], obs[2])
+            
+        painter.setBrush(QColor(255, 100, 100))
+        for t in self.targets:
+            painter.drawEllipse(QPointF(t[0], t[1] - 30), 30, 30)
+
+        painter.setBrush(QColor(50, 50, 255))
+        painter.drawRect(100, 460, 30, 40)
+        painter.drawLine(115, 455, int(115 + math.cos(math.radians(self.angle))*40), int(455 - math.sin(math.radians(self.angle))*40))
+
+        painter.setBrush(Qt.GlobalColor.white)
+        for sb in self.snowballs:
+            painter.drawEllipse(QPointF(sb.x, sb.y), sb.radius, sb.radius)
+
+    def mouseMoveEvent(self, event):
+        lx, ly = event.position().x(), event.position().y()
+        self.angle = math.degrees(math.atan2(455 - ly, lx - 115))
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self.is_charging = True
+            self.power_phase = 0
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.is_charging:
+            self.is_charging = False
+            self.snowballs.append(Snowball(115, 455, self.angle, self.power))
+            self.power = 0
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setCentralWidget(GameWidget())
+        self.resize(1200, 600)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())

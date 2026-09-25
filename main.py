@@ -13,7 +13,10 @@ FPS = 60
 
 class GameState:
     MENU = "MENU"
-    GAME = "GAME"
+    LEVEL_MODE = "LEVEL_MODE"
+    TRAINING_MODE = "TRAINING_MODE"
+    GAME_OVER = "GAME_OVER"
+    VICTORY = "VICTORY"
 
 class Snowball:
     def __init__(self, x, y, angle, power):
@@ -28,14 +31,24 @@ class Snowball:
         self.vy += GRAVITY
         if self.y > GROUND_Y or self.x > LOGICAL_WIDTH or self.x < 0: self.active = False
 
-class Target:
-    def __init__(self, x):
-        self.x, self.y, self.hp, self.scale = x, GROUND_Y, 1, 1.0
-
 class Obstacle:
     def __init__(self, x, w, h):
         self.x, self.w, self.h = x, w, h
         self.cx, self.cy = x + w / 2, GROUND_Y
+
+class Target:
+    def __init__(self, x=None, hp=1, scale=1.0, is_boss=False):
+        self.hp = hp
+        self.max_hp = hp
+        self.scale = scale
+        self.is_boss = is_boss
+        self.x = x if x else random.randint(450, 1100)
+        self.y = GROUND_Y
+
+    def reset(self, hp=1):
+        self.x = random.randint(450, 1100)
+        self.hp = hp
+        self.max_hp = hp
 
 class GameWidget(QWidget):
     def __init__(self):
@@ -47,18 +60,62 @@ class GameWidget(QWidget):
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(self.update_game)
         self.game_timer.start(1000 // FPS)
+        
+        self.clock_timer = QTimer()
+        self.clock_timer.timeout.connect(self.tick_seconds)
+        self.clock_timer.start(1000)
 
-    def start_game(self):
-        self.state = GameState.GAME
-        self.player_x, self.angle = 100, 45
-        self.snowballs = []
-        self.targets = [Target(600), Target(900)]
-        self.obstacles = [Obstacle(300, 100, 80)]
-        self.snowballs_left, self.score, self.power, self.power_phase = 15, 0, 0, 0
+        self.init_variables()
+
+    def init_variables(self):
+        self.score, self.level, self.snowballs_left, self.time_left = 0, 1, 15, -1
+        self.player_x, self.angle, self.power, self.power_phase = 100, 45, 0, 0
+        self.snowballs, self.targets, self.obstacles = [], [], []
         self.is_charging = False
 
+    def start_level(self, level):
+        self.state = GameState.LEVEL_MODE
+        self.level = level
+        self.snowballs, self.obstacles, self.time_left = [], [], -1
+        
+        if level == 1:
+            self.snowballs_left = 12
+            self.targets = [Target(600, 1), Target(900, 1)]
+            self.obstacles = [Obstacle(300, 100, 80)]
+        elif level == 2:
+            self.snowballs_left = 15
+            self.targets = [Target(550, 1), Target(800, 2), Target(1000, 1)]
+            self.obstacles = [Obstacle(300, 80, 100)]
+        elif level == 3:
+            self.snowballs_left = 15
+            self.time_left = 40
+            self.targets = [Target(550, 2), Target(750, 2), Target(950, 2)]
+            self.obstacles = [Obstacle(280, 70, 120), Obstacle(650, 70, 80)]
+        elif level in [4, 5, 6, 7, 8, 9]:
+            self.snowballs_left = 20
+            self.time_left = 45
+            self.targets = [Target(500, 2), Target(800, 3)]
+            self.obstacles = [Obstacle(300, 100, 120)]
+        elif level == 10:
+            self.snowballs_left = 30
+            self.time_left = 60
+            self.targets = [Target(950, hp=15, scale=0.5, is_boss=True)]
+            self.obstacles = [Obstacle(350, 120, 130)]
+
+    def start_training(self):
+        self.init_variables()
+        self.state = GameState.TRAINING_MODE
+        self.snowballs_left = 9999
+        self.targets = [Target(scale=random.uniform(0.7, 1.2)) for _ in range(3)]
+        self.obstacles = [Obstacle(300, 120, 100)]
+
+    def tick_seconds(self):
+        if self.state == GameState.LEVEL_MODE and self.time_left > 0:
+            self.time_left -= 1
+            if self.time_left <= 0: self.state = GameState.GAME_OVER
+
     def update_game(self):
-        if self.state != GameState.GAME: return
+        if self.state not in [GameState.LEVEL_MODE, GameState.TRAINING_MODE]: return
         
         if self.is_charging:
             self.power_phase += 0.05
@@ -66,7 +123,6 @@ class GameWidget(QWidget):
 
         for sb in self.snowballs[:]:
             sb.update()
-            
             for obs in self.obstacles:
                 a, b = obs.w / 2 + sb.radius, obs.h + sb.radius
                 nx, ny = (sb.x - obs.cx) / a, (sb.y - obs.cy) / b
@@ -80,38 +136,56 @@ class GameWidget(QWidget):
             for t in self.targets[:]:
                 hit = False
                 for offset, r in [(-15, 25), (-45, 20), (-65, 15)]:
-                    if math.hypot(sb.x - t.x, sb.y - (t.y + offset)) < sb.radius + r:
-                        hit, t.hp = True, t.hp - 1
-                        self.score += 100
-                        if sb in self.snowballs: self.snowballs.remove(sb)
-                        if t.hp <= 0: self.targets.remove(t)
-                        break
-                if hit: break
-        self.update()
+                    cy = t.y + (offset * t.scale)
+                    if math.hypot(sb.x - t.x, sb.y - cy) < sb.radius + (r * t.scale):
+                        hit = True; break
+                if hit:
+                    t.hp -= 1
+                    self.score += 100
+                    if sb in self.snowballs: self.snowballs.remove(sb)
+                    if t.hp <= 0:
+                        if self.state == GameState.TRAINING_MODE: t.reset(hp=1)
+                        else: self.targets.remove(t)
+                    break
 
-    def keyPressEvent(self, event):
-        if self.state == GameState.MENU and event.key() == Qt.Key.Key_Space:
-            self.start_game()
-        elif self.state == GameState.GAME and event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self.is_charging = True; self.power_phase = 0
-            
-    def keyReleaseEvent(self, event):
-        if self.state == GameState.GAME and event.key() == Qt.Key.Key_Space and self.is_charging:
-            self.is_charging = False
-            if self.snowballs_left > 0:
-                self.snowballs_left -= 1
-                self.snowballs.append(Snowball(self.player_x + 15, GROUND_Y - 45, self.angle, self.power))
-            self.power = 0
+        if self.state == GameState.LEVEL_MODE:
+            if not self.targets:
+                if self.level < 10: self.start_level(self.level + 1)
+                else: self.state = GameState.VICTORY
+            elif self.snowballs_left <= 0 and not self.snowballs:
+                self.state = GameState.GAME_OVER
+
+        self.update()
 
     def get_scaling(self):
         scale = min(self.width() / LOGICAL_WIDTH, self.height() / LOGICAL_HEIGHT)
         return scale, (self.width() - LOGICAL_WIDTH * scale) / 2, (self.height() - LOGICAL_HEIGHT * scale) / 2
 
     def mouseMoveEvent(self, event):
-        if self.state == GameState.GAME:
-            scale, off_x, off_y = self.get_scaling()
-            lx, ly = (event.position().x() - off_x) / scale, (event.position().y() - off_y) / scale
-            self.angle = math.degrees(math.atan2((GROUND_Y - 45) - ly, lx - (self.player_x + 15)))
+        scale, off_x, off_y = self.get_scaling()
+        lx = (event.position().x() - off_x) / scale
+        ly = (event.position().y() - off_y) / scale
+        self.angle = math.degrees(math.atan2((GROUND_Y - 45) - ly, lx - (self.player_x + 15)))
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.state = GameState.MENU
+        elif self.state == GameState.MENU:
+            if event.key() == Qt.Key.Key_Space: self.start_level(1)
+            elif event.key() == Qt.Key.Key_T: self.start_training()
+        elif self.state in [GameState.LEVEL_MODE, GameState.TRAINING_MODE]:
+            if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+                self.is_charging = True; self.power_phase = 0
+        elif self.state in [GameState.GAME_OVER, GameState.VICTORY] and event.key() == Qt.Key.Key_Space:
+            self.init_variables(); self.start_level(1)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.is_charging:
+            self.is_charging = False
+            if self.snowballs_left > 0:
+                if self.state == GameState.LEVEL_MODE: self.snowballs_left -= 1
+                self.snowballs.append(Snowball(self.player_x + 15, GROUND_Y - 45, self.angle, self.power))
+            self.power = 0
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -122,17 +196,17 @@ class GameWidget(QWidget):
         painter.scale(scale, scale)
 
         if self.state == GameState.MENU:
-            painter.setFont(QFont("Verdana", 40, QFont.Weight.Bold))
-            painter.setPen(Qt.GlobalColor.white) 
-            painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, "СНЕЖКИ\nНажмите ПРОБЕЛ")
-        else:
+            painter.setFont(QFont("Verdana", 30, QFont.Weight.Bold))
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, "СНЕЖКИ\n\nSPACE - Поход\nT - Тренировка")
+        elif self.state in [GameState.LEVEL_MODE, GameState.TRAINING_MODE]:
             painter.fillRect(0, 0, LOGICAL_WIDTH, GROUND_Y, QColor("#DFF9FB"))
             painter.fillRect(0, GROUND_Y, LOGICAL_WIDTH, LOGICAL_HEIGHT - GROUND_Y, QColor("#FFFFFF"))
             
             for obs in self.obstacles:
                 painter.setBrush(QColor("#FFFFFF"))
                 painter.setPen(QPen(QColor("#B2BEC3"), 2))
-                painter.drawChord(QRectF(obs.x, GROUND_Y - obs.h, obs.w, obs.h * 2), 0, 180 * 16) 
+                painter.drawChord(QRectF(obs.x, GROUND_Y - obs.h, obs.w, obs.h * 2), 0, 180 * 16)
 
             painter.setBrush(QColor("#2980b9"))
             painter.drawRect(self.player_x, GROUND_Y - 40, 30, 40)
@@ -140,6 +214,7 @@ class GameWidget(QWidget):
             for t in self.targets:
                 painter.save()
                 painter.translate(t.x, t.y)
+                painter.scale(t.scale, t.scale)
                 painter.setBrush(Qt.GlobalColor.white)
                 painter.setPen(QPen(QColor("#95a5a6"), 1))
                 painter.drawEllipse(QPointF(0, -15), 25, 25)
@@ -153,17 +228,20 @@ class GameWidget(QWidget):
                 
             painter.setPen(QColor("#2C3E50"))
             painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-            painter.drawText(20, 40, f"Счёт: {self.score} | Снежки: {self.snowballs_left}")
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(20, 60, 200, 15)
-            p_w = int(((self.power-5) / 18) * 200) if self.power > 5 else 0
-            painter.fillRect(21, 61, max(0, p_w), 14, QColor("#F1C40F"))
+            txt = f"Уровень: {self.level} | Счёт: {self.score} | Снежки: {self.snowballs_left}"
+            if self.time_left > 0: txt += f" | Время: {self.time_left}"
+            painter.drawText(20, 40, txt)
+        else:
+            painter.setFont(QFont("Arial", 30, QFont.Weight.Bold))
+            painter.setPen(Qt.GlobalColor.yellow)
+            msg = "ПОБЕДА!" if self.state == GameState.VICTORY else "ИГРА ОКОНЧЕНА"
+            painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, f"{msg}\n\nSPACE - Начать заново")
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setCentralWidget(GameWidget())
-        self.setWindowTitle("Snowball: Stage 7 (Pre-Release)")
+        self.setWindowTitle("Snowball: Stage 8 (Architecture Update)")
         self.resize(1100, 600)
 
 if __name__ == "__main__":

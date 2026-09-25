@@ -56,6 +56,7 @@ class GameWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.state = GameState.MENU
+        self.showing_rules = False
         
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(self.update_game)
@@ -76,7 +77,7 @@ class GameWidget(QWidget):
     def start_level(self, level):
         self.state = GameState.LEVEL_MODE
         self.level = level
-        self.snowballs, self.obstacles, self.time_left = [], [], -1
+        self.snowballs, self.obstacles = [], []
         
         if level == 1:
             self.snowballs_left = 12
@@ -171,8 +172,8 @@ class GameWidget(QWidget):
         if event.key() == Qt.Key.Key_Escape:
             self.state = GameState.MENU
         elif self.state == GameState.MENU:
-            if event.key() == Qt.Key.Key_Space: self.start_level(1)
-            elif event.key() == Qt.Key.Key_T: self.start_training()
+            if event.key() == Qt.Key.Key_1: self.start_level(1)
+            elif event.key() == Qt.Key.Key_2: self.start_training()
         elif self.state in [GameState.LEVEL_MODE, GameState.TRAINING_MODE]:
             if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
                 self.is_charging = True; self.power_phase = 0
@@ -196,52 +197,133 @@ class GameWidget(QWidget):
         painter.scale(scale, scale)
 
         if self.state == GameState.MENU:
-            painter.setFont(QFont("Verdana", 30, QFont.Weight.Bold))
-            painter.setPen(Qt.GlobalColor.white)
-            painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, "СНЕЖКИ\n\nSPACE - Поход\nT - Тренировка")
+            self.draw_menu(painter)
         elif self.state in [GameState.LEVEL_MODE, GameState.TRAINING_MODE]:
-            painter.fillRect(0, 0, LOGICAL_WIDTH, GROUND_Y, QColor("#DFF9FB"))
-            painter.fillRect(0, GROUND_Y, LOGICAL_WIDTH, LOGICAL_HEIGHT - GROUND_Y, QColor("#FFFFFF"))
-            
-            for obs in self.obstacles:
-                painter.setBrush(QColor("#FFFFFF"))
-                painter.setPen(QPen(QColor("#B2BEC3"), 2))
-                painter.drawChord(QRectF(obs.x, GROUND_Y - obs.h, obs.w, obs.h * 2), 0, 180 * 16)
-
-            painter.setBrush(QColor("#2980b9"))
-            painter.drawRect(self.player_x, GROUND_Y - 40, 30, 40)
-            
-            for t in self.targets:
-                painter.save()
-                painter.translate(t.x, t.y)
-                painter.scale(t.scale, t.scale)
-                painter.setBrush(Qt.GlobalColor.white)
-                painter.setPen(QPen(QColor("#95a5a6"), 1))
-                painter.drawEllipse(QPointF(0, -15), 25, 25)
-                painter.drawEllipse(QPointF(0, -45), 20, 20)
-                painter.drawEllipse(QPointF(0, -65), 15, 15)
-                painter.restore()
-
-            for sb in self.snowballs:
-                painter.setBrush(Qt.GlobalColor.white)
-                painter.drawEllipse(QPointF(sb.x, sb.y), sb.radius, sb.radius)
-                
-            painter.setPen(QColor("#2C3E50"))
-            painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-            txt = f"Уровень: {self.level} | Счёт: {self.score} | Снежки: {self.snowballs_left}"
-            if self.time_left > 0: txt += f" | Время: {self.time_left}"
-            painter.drawText(20, 40, txt)
+            self.draw_gameplay(painter)
         else:
-            painter.setFont(QFont("Arial", 30, QFont.Weight.Bold))
-            painter.setPen(Qt.GlobalColor.yellow)
-            msg = "ПОБЕДА!" if self.state == GameState.VICTORY else "ИГРА ОКОНЧЕНА"
-            painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, f"{msg}\n\nSPACE - Начать заново")
+            self.draw_final_screen(painter)
+
+    def draw_gameplay(self, painter):
+        painter.fillRect(0, 0, LOGICAL_WIDTH, GROUND_Y, QColor("#DFF9FB"))
+        painter.fillRect(0, GROUND_Y, LOGICAL_WIDTH, LOGICAL_HEIGHT - GROUND_Y, QColor("#FFFFFF"))
+        
+        for obs in self.obstacles:
+            painter.setBrush(QColor("#FFFFFF"))
+            painter.setPen(QPen(QColor("#B2BEC3"), 2))
+            painter.drawChord(QRectF(obs.x, GROUND_Y - obs.h, obs.w, obs.h * 2), 0, 180 * 16)
+
+        self.draw_player(painter)
+        
+        for t in self.targets:
+            self.draw_snowman_target(painter, t)
+
+        for sb in self.snowballs:
+            painter.setBrush(Qt.GlobalColor.white)
+            painter.setPen(QPen(QColor("#B2BEC3"), 1))
+            painter.drawEllipse(QPointF(sb.x, sb.y), sb.radius, sb.radius)
+            
+        self.draw_ui(painter)
+
+    def draw_player(self, painter):
+        px, py = self.player_x, GROUND_Y
+        painter.setBrush(QColor("#2980b9"))
+        painter.drawRect(px, py - 40, 30, 40)
+        painter.setBrush(QColor("#ffdbac"))
+        painter.drawEllipse(QPointF(px + 15, py - 50), 12, 12)
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawChord(int(px+5), int(py-55), 20, 20, 0, -180*16)
+        painter.setBrush(QColor("#e74c3c"))
+        pts = [QPointF(px+3, py-58), QPointF(px+27, py-58), QPointF(px+15, py-80)]
+        painter.drawPolygon(pts)
+        
+        angle_rad = math.radians(self.angle)
+        line_len = 40 + self.power * 2
+        painter.setPen(QPen(Qt.GlobalColor.red, 2, Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(px+15, py-45), QPointF(px+15 + math.cos(angle_rad)*line_len, py-45 - math.sin(angle_rad)*line_len))
+
+    def draw_snowman_target(self, painter, t):
+        painter.save()
+        painter.translate(t.x, t.y)
+        painter.scale(t.scale, t.scale)
+        
+        body_color = QColor("#bdc3c7") if t.is_boss else Qt.GlobalColor.white
+        painter.setBrush(body_color)
+        painter.setPen(QPen(QColor("#95a5a6"), 1))
+        painter.drawEllipse(QPointF(0, -15), 25, 25)
+        painter.drawEllipse(QPointF(0, -45), 20, 20)
+        painter.drawEllipse(QPointF(0, -65), 15, 15)
+        
+        painter.setBrush(QColor("#e67e22"))
+        painter.drawPolygon([QPointF(0, -65), QPointF(15, -63), QPointF(0, -61)])
+        painter.setBrush(Qt.GlobalColor.black)
+        painter.drawEllipse(QPointF(-5, -68), 2, 2)
+        painter.drawEllipse(QPointF(5, -68), 2, 2)
+        
+        if t.is_boss:
+            painter.setBrush(QColor("#f1c40f"))
+            painter.drawPolygon([QPointF(-12, -75), QPointF(-15, -95), QPointF(-5, -85), QPointF(0, -100), QPointF(5, -85), QPointF(15, -95), QPointF(12, -75)])
+        else:
+            painter.setBrush(QColor("#7f8c8d"))
+            painter.drawRect(-12, -85, 24, 10)
+        painter.restore()
+
+        if t.max_hp > 1 or t.is_boss:
+            bar_w = 60 if t.is_boss else 45
+            bar_h, bar_x, bar_y = 12, t.x - (60 if t.is_boss else 45) / 2, t.y - (95 * t.scale) - 25
+            painter.setBrush(QColor("#e74c3c"))
+            painter.setPen(QPen(Qt.GlobalColor.black, 1))
+            painter.drawRoundedRect(int(bar_x), int(bar_y), bar_w, bar_h, 3, 3)
+            hp_width = int((bar_w - 2) * (t.hp / t.max_hp))
+            painter.setBrush(QColor("#2ecc71"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            if hp_width > 0: painter.drawRoundedRect(int(bar_x + 1), int(bar_y + 1), hp_width, bar_h - 2, 2, 2)
+
+    def draw_ui(self, painter):
+        painter.setPen(QColor("#2C3E50"))
+        painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        level_txt = f"УРОВЕНЬ {self.level}/10" if self.state == GameState.LEVEL_MODE else "ТРЕНИРОВКА"
+        info = f"{level_txt} | Счёт: {self.score}"
+        if self.state == GameState.LEVEL_MODE:
+             info += f" | Снежки: {self.snowballs_left}"
+             if self.time_left > 0: info += f" | ВРЕМЯ: {self.time_left}"
+        painter.drawText(20, 40, info)
+        
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Qt.GlobalColor.black, 2))
+        painter.drawRect(20, 60, 200, 15)
+        p_w = int(((self.power-5) / 18) * 200) if self.power > 5 else 0
+        painter.fillRect(21, 61, max(0, p_w), 14, QColor("#F1C40F"))
+
+    def draw_menu(self, painter):
+        painter.setFont(QFont("Verdana", 40, QFont.Weight.Bold))
+        painter.setPen(Qt.GlobalColor.white) 
+        painter.drawText(0, 80, LOGICAL_WIDTH, 100, Qt.AlignmentFlag.AlignCenter, "СНЕЖКИ")
+        
+        b_w, b_h, b_x = 340, 48, (LOGICAL_WIDTH - 340) // 2
+        def draw_menu_button(y_pos, text):
+            painter.setBrush(QColor("#203245")) 
+            painter.setPen(QPen(QColor("#A2D9CE"), 2)) 
+            painter.drawRoundedRect(b_x, y_pos, b_w, b_h, 8, 8)
+            painter.setPen(QColor("#A2D9CE"))
+            painter.setFont(QFont("Verdana", 12, QFont.Weight.Bold))
+            painter.drawText(b_x, y_pos, b_w, b_h, Qt.AlignmentFlag.AlignCenter, text)
+
+        draw_menu_button(210, "ПРАВИЛА ИГРЫ")
+        draw_menu_button(275, "НАЧАТЬ ПОХОД (10 УРОВНЕЙ)")
+        draw_menu_button(340, "ТРЕНИРОВКА")
+        draw_menu_button(405, "ВЫХОД")
+
+    def draw_final_screen(self, painter):
+        painter.setPen(Qt.GlobalColor.yellow)
+        painter.setFont(QFont("Arial", 30, QFont.Weight.Bold))
+        msg = "ПОБЕДА!" if self.state == GameState.VICTORY else "ЗАМЕРЗЛИ РУКИ, ТЫ ПРОИГРАЛ"
+        painter.drawText(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT, Qt.AlignmentFlag.AlignCenter, f"{msg}\n\nSPACE - Повторить\nESC - В меню")
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setCentralWidget(GameWidget())
-        self.setWindowTitle("Snowball: Stage 8 (Architecture Update)")
+        self.setWindowTitle("Snowball: Stage 9 (Visual Refinement)")
         self.resize(1100, 600)
 
 if __name__ == "__main__":

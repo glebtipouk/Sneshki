@@ -1,41 +1,51 @@
 import sys
 import math
-import random
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget
-from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QTimer, QPointF
+
+LOGICAL_WIDTH = 1200
+LOGICAL_HEIGHT = 600
+GROUND_Y = 500
+GRAVITY = 0.45
+FPS = 60
 
 class Snowball:
     def __init__(self, x, y, angle, power):
-        self.x = x; self.y = y; self.radius = 8
+        self.x = x
+        self.y = y
+        self.radius = 8
         self.vx = math.cos(math.radians(angle)) * power
         self.vy = -math.sin(math.radians(angle)) * power
         self.active = True
+
     def update(self):
-        self.x += self.vx; self.y += self.vy; self.vy += 0.45
-        if self.y > 500 or self.x > 1200 or self.x < 0: self.active = False
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += GRAVITY
+        if self.y > GROUND_Y or self.x > LOGICAL_WIDTH or self.x < 0:
+            self.active = False
 
 class GameWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.player_x = 100
+        self.angle = 45
+        self.snowballs = []
+        
+        self.snowballs_left = 15
+        self.score = 0
+        self.power = 0
+        self.power_phase = 0
+        self.is_charging = False
+        
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(self.update_game)
-        self.game_timer.start(1000 // 60)
-        
-        self.state = "MENU" # Возможные состояния: MENU, GAME
-        self.snowballs = []; self.targets = []; self.obstacles = []
-        self.angle = 45; self.power = 0; self.is_charging = False; self.power_phase = 0
-
-    def start_game(self):
-        self.state = "GAME"
-        self.snowballs = []
-        self.targets = [[800, 500], [1000, 500]]
-        self.obstacles = [[400, 100, 100]]
+        self.game_timer.start(1000 // FPS)
 
     def update_game(self):
-        if self.state != "GAME": return
         if self.is_charging:
             self.power_phase += 0.05
             self.power = 5 + 18 * abs(math.sin(self.power_phase))
@@ -43,59 +53,70 @@ class GameWidget(QWidget):
         for sb in self.snowballs[:]:
             sb.update()
             if not sb.active:
-                self.snowballs.remove(sb); continue
-            for t in self.targets[:]:
-                if math.hypot(sb.x - t[0], sb.y - (t[1] - 30)) < sb.radius + 30:
-                    self.targets.remove(t); self.snowballs.remove(sb)
-                    self.targets.append([random.randint(600, 1100), 500])
-                    break
+                self.snowballs.remove(sb)
         self.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self.is_charging = True
+            self.power_phase = 0
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.is_charging:
+            self.is_charging = False
+            if self.snowballs_left > 0:
+                self.snowballs_left -= 1
+                self.snowballs.append(Snowball(self.player_x + 15, GROUND_Y - 45, self.angle, self.power))
+            self.power = 0
+
+    def get_scaling(self):
+        scale = min(self.width() / LOGICAL_WIDTH, self.height() / LOGICAL_HEIGHT)
+        return scale, (self.width() - LOGICAL_WIDTH * scale) / 2, (self.height() - LOGICAL_HEIGHT * scale) / 2
+
+    def mouseMoveEvent(self, event):
+        scale, off_x, off_y = self.get_scaling()
+        lx = (event.position().x() - off_x) / scale
+        ly = (event.position().y() - off_y) / scale
+        self.angle = math.degrees(math.atan2((GROUND_Y - 45) - ly, lx - (self.player_x + 15)))
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        if self.state == "MENU":
-            painter.fillRect(0, 0, 1200, 600, Qt.GlobalColor.black)
-            painter.setPen(Qt.GlobalColor.white)
-            painter.drawText(550, 200, "ИГРА СНЕЖКИ")
-            painter.drawText(550, 300, "[ КЛИКНИ СЮДА ЧТОБЫ ИГРАТЬ ]")
-            painter.drawText(550, 400, "[ КЛИКНИ СЮДА ЧТОБЫ ВЫЙТИ ]")
-        elif self.state == "GAME":
-            painter.fillRect(0, 0, 1200, 500, QColor(200, 200, 200))
-            painter.fillRect(0, 500, 1200, 100, QColor(100, 100, 100))
-            for obs in self.obstacles: painter.drawRect(obs[0], 500 - obs[2], obs[1], obs[2])
-            painter.setBrush(QColor(255, 100, 100))
-            for t in self.targets: painter.drawEllipse(QPointF(t[0], t[1] - 30), 30, 30)
-            painter.setBrush(QColor(50, 50, 255))
-            painter.drawRect(100, 460, 30, 40)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        scale, off_x, off_y = self.get_scaling()
+        painter.fillRect(self.rect(), QColor("#1a2a3a"))
+        painter.translate(off_x, off_y)
+        painter.scale(scale, scale)
+
+        painter.fillRect(0, 0, LOGICAL_WIDTH, GROUND_Y, QColor("#DFF9FB"))
+        painter.fillRect(0, GROUND_Y, LOGICAL_WIDTH, LOGICAL_HEIGHT - GROUND_Y, QColor("#FFFFFF"))
+        
+        painter.setBrush(QColor("#2980b9"))
+        painter.drawRect(self.player_x, GROUND_Y - 40, 30, 40)
+        
+        for sb in self.snowballs:
             painter.setBrush(Qt.GlobalColor.white)
-            for sb in self.snowballs: painter.drawEllipse(QPointF(sb.x, sb.y), sb.radius, sb.radius)
-            painter.drawText(10, 20, "ESC - В МЕНЮ")
+            painter.setPen(QPen(QColor("#B2BEC3"), 1))
+            painter.drawEllipse(QPointF(sb.x, sb.y), sb.radius, sb.radius)
+            
+        self.draw_ui(painter)
 
-    def mousePressEvent(self, event):
-        lx, ly = event.position().x(), event.position().y()
-        if self.state == "MENU":
-            if 280 <= ly <= 320: self.start_game()
-            elif 380 <= ly <= 420: sys.exit()
-
-    def mouseMoveEvent(self, event):
-        if self.state == "GAME":
-            self.angle = math.degrees(math.atan2(455 - event.position().y(), event.position().x() - 115))
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape: self.state = "MENU"
-        if self.state == "GAME" and event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self.is_charging = True; self.power_phase = 0
-
-    def keyReleaseEvent(self, event):
-        if self.state == "GAME" and event.key() == Qt.Key.Key_Space and self.is_charging:
-            self.is_charging = False
-            self.snowballs.append(Snowball(115, 455, self.angle, self.power))
+    def draw_ui(self, painter):
+        painter.setPen(QColor("#2C3E50"))
+        painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        painter.drawText(20, 40, f"Счёт: {self.score} | Снежки: {self.snowballs_left}")
+        
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Qt.GlobalColor.black, 2))
+        painter.drawRect(20, 60, 200, 15)
+        p_w = int(((self.power-5) / 18) * 200) if self.power > 5 else 0
+        painter.fillRect(21, 61, max(0, p_w), 14, QColor("#F1C40F"))
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setCentralWidget(GameWidget())
-        self.resize(1200, 600)
+        self.setWindowTitle("Snowball: Stage 5")
+        self.resize(1100, 600)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

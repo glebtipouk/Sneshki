@@ -13,11 +13,10 @@ class GameWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        # Простой фон (серое небо) и земля
+       
         painter.fillRect(0, 0, 1200, 500, QColor(200, 200, 200))
         painter.fillRect(0, 500, 1200, 100, QColor(100, 100, 100))
         
-        # Рисуем "палочного" персонажа без дизайна
         painter.setBrush(QColor(50, 50, 255))
         painter.drawRect(self.player_x, 460, 30, 40) # Тело
         painter.setBrush(QColor(255, 200, 200))
